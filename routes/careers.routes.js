@@ -1,8 +1,22 @@
 import express from 'express';
 import multer from 'multer';
-import { applyForJob } from '../controller/career.controller.js';
+import {
+  applyForJob,
+  getOpenings,
+  getOpeningBySlug,
+  createOpening,
+  updateOpening,
+  deleteOpening,
+} from '../controller/career.controller.js';
 
 const router = express.Router();
+
+// Job openings (for frontend + CRUD)
+router.get('/careers/openings', getOpenings);
+router.get('/careers/openings/:slug', getOpeningBySlug);
+router.post('/careers/openings', createOpening);
+router.put('/careers/openings/:id', updateOpening);
+router.delete('/careers/openings/:id', deleteOpening);
 
 // Configure multer for memory storage (to upload directly to Cloudinary)
 const storage = multer.memoryStorage();
