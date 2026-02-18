@@ -5,6 +5,7 @@ import cors from 'cors';
 import connectDB from './config/database.js';
 import careersRoutes from './routes/careers.routes.js';
 import contactRoutes from './routes/contact.routes.js';
+import newsletterRoutes from './routes/newsletter.routes.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -22,6 +23,7 @@ app.use(cors({
 app.use(express.urlencoded({ extended: true }));
 app.use(careersRoutes);
 app.use(contactRoutes);
+app.use(newsletterRoutes);
 
 app.get('/', (req, res) => {
   res.status(200).json({ message: 'Server is up and running' });
