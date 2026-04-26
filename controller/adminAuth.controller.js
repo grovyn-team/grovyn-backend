@@ -39,6 +39,12 @@ function generateOtp() {
   return randomInt(0, 1_000_000).toString().padStart(6, '0');
 }
 
+/** Redis/Upstash may return string or number for digit-only values; normalize before compare. */
+function otpEquals(stored, input) {
+  if (stored == null || input == null) return false;
+  return String(stored).trim() === String(input).trim();
+}
+
 function jwtSecret() {
   const s = process.env.ADMIN_JWT_SECRET;
   if (!s?.trim()) return null;
@@ -207,7 +213,7 @@ export async function adminVerifyLoginOtp(req, res) {
     }
 
     const stored = await redisGet(k.loginOtp);
-    if (!stored || stored !== code) {
+    if (!otpEquals(stored, code)) {
       return res.status(401).json({ success: false, message: 'Invalid or expired code.' });
     }
 
@@ -361,7 +367,7 @@ export async function adminVerifyResetOtp(req, res) {
     const k = keys(emailKey);
     const stored = await redisGet(k.resetOtp);
 
-    if (!stored || stored !== code) {
+    if (!otpEquals(stored, code)) {
       return res.status(401).json({ success: false, message: 'Invalid or expired code.' });
     }
 

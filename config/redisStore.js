@@ -27,7 +27,8 @@ function getUpstash() {
     if (!url || !token) {
       throw new Error('UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN must be set');
     }
-    upstashClient = new UpstashRedis({ url, token });
+    /** Raw string values from GET; default client JSON-parses so "608783" becomes number and breaks OTP compare. */
+    upstashClient = new UpstashRedis({ url, token, automaticDeserialization: false });
   }
   return upstashClient;
 }
