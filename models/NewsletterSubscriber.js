@@ -25,7 +25,6 @@ const newsletterSubscriberSchema = new mongoose.Schema(
   }
 );
 
-newsletterSubscriberSchema.index({ email: 1 }, { unique: true });
 newsletterSubscriberSchema.index({ subscribedAt: -1 });
 
 const NewsletterSubscriber = mongoose.model('NewsletterSubscriber', newsletterSubscriberSchema);

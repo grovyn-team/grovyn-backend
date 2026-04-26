@@ -59,7 +59,6 @@ const jobOpeningSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-jobOpeningSchema.index({ slug: 1 });
 jobOpeningSchema.index({ order: 1, createdAt: -1 });
 
 const JobOpening = mongoose.model('JobOpening', jobOpeningSchema);

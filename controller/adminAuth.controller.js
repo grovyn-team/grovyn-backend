@@ -2,7 +2,13 @@ import { randomInt } from 'crypto';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import AdminUser from '../models/AdminUser.js';
-import { getRedis } from '../config/redis.js';
+import {
+  ensureRedisConfigured,
+  redisSet,
+  redisGet,
+  redisDel,
+  redisTtl,
+} from '../config/redisStore.js';
 import { sendAdminLoginOtpEmail, sendAdminPasswordResetOtpEmail } from '../services/adminEmail.js';
 
 const NS = 'grovyn:admin';
@@ -40,7 +46,7 @@ function jwtSecret() {
 }
 
 function assertOtpStack() {
-  getRedis();
+  ensureRedisConfigured();
   if (!process.env.RESEND_API_KEY?.trim()) {
     throw new Error('RESEND_API_KEY is not set');
   }
@@ -141,17 +147,16 @@ export async function adminLogin(req, res) {
       return res.status(401).json({ success: false, message: 'Invalid credentials.' });
     }
 
-    const redis = getRedis();
     const k = keys(emailKey);
     const otp = generateOtp();
 
-    await redis.set(k.loginChallenge, '1', 'EX', LOGIN_CHALLENGE_TTL_SEC);
-    await redis.set(k.loginOtp, otp, 'EX', OTP_TTL_SEC);
+    await redisSet(k.loginChallenge, '1', LOGIN_CHALLENGE_TTL_SEC);
+    await redisSet(k.loginOtp, otp, OTP_TTL_SEC);
 
     try {
       await sendAdminLoginOtpEmail(user.email, otp);
     } catch (mailErr) {
-      await redis.del(k.loginChallenge, k.loginOtp);
+      await redisDel(k.loginChallenge, k.loginOtp);
       console.error('adminLogin email', mailErr);
       return res.status(502).json({
         success: false,
@@ -191,10 +196,9 @@ export async function adminVerifyLoginOtp(req, res) {
       return res.status(400).json({ success: false, message: 'Email and code are required.' });
     }
 
-    const redis = getRedis();
     const k = keys(emailKey);
 
-    const challenge = await redis.get(k.loginChallenge);
+    const challenge = await redisGet(k.loginChallenge);
     if (!challenge) {
       return res.status(401).json({
         success: false,
@@ -202,18 +206,18 @@ export async function adminVerifyLoginOtp(req, res) {
       });
     }
 
-    const stored = await redis.get(k.loginOtp);
+    const stored = await redisGet(k.loginOtp);
     if (!stored || stored !== code) {
       return res.status(401).json({ success: false, message: 'Invalid or expired code.' });
     }
 
     const user = await AdminUser.findOne({ email: emailKey });
     if (!user || !user.isActive) {
-      await redis.del(k.loginChallenge, k.loginOtp, k.loginOtpCooldown);
+      await redisDel(k.loginChallenge, k.loginOtp, k.loginOtpCooldown);
       return res.status(401).json({ success: false, message: 'Invalid credentials.' });
     }
 
-    await redis.del(k.loginChallenge, k.loginOtp, k.loginOtpCooldown);
+    await redisDel(k.loginChallenge, k.loginOtp, k.loginOtpCooldown);
 
     const token = jwt.sign({ role: 'admin', sub: user.email }, secret, { expiresIn: '7d' });
 
@@ -241,10 +245,9 @@ export async function adminResendLoginOtp(req, res) {
       return res.status(400).json({ success: false, message: 'Email is required.' });
     }
 
-    const redis = getRedis();
     const k = keys(emailKey);
 
-    const challenge = await redis.get(k.loginChallenge);
+    const challenge = await redisGet(k.loginChallenge);
     if (!challenge) {
       return res.status(401).json({
         success: false,
@@ -252,7 +255,7 @@ export async function adminResendLoginOtp(req, res) {
       });
     }
 
-    const cooldownTtl = await redis.ttl(k.loginOtpCooldown);
+    const cooldownTtl = await redisTtl(k.loginOtpCooldown);
     if (cooldownTtl > 0) {
       return res.status(429).json({
         success: false,
@@ -267,8 +270,8 @@ export async function adminResendLoginOtp(req, res) {
     }
 
     const otp = generateOtp();
-    await redis.set(k.loginOtp, otp, 'EX', OTP_TTL_SEC);
-    await redis.set(k.loginOtpCooldown, '1', 'EX', OTP_RESEND_COOLDOWN_SEC);
+    await redisSet(k.loginOtp, otp, OTP_TTL_SEC);
+    await redisSet(k.loginOtpCooldown, '1', OTP_RESEND_COOLDOWN_SEC);
 
     try {
       await sendAdminLoginOtpEmail(user.email, otp);
@@ -301,10 +304,9 @@ export async function adminForgotPassword(req, res) {
       return res.status(400).json({ success: false, message: 'Email is required.' });
     }
 
-    const redis = getRedis();
     const k = keys(emailKey);
 
-    const cooldownTtl = await redis.ttl(k.resetCooldown);
+    const cooldownTtl = await redisTtl(k.resetCooldown);
     if (cooldownTtl > 0) {
       return res.status(429).json({
         success: false,
@@ -320,18 +322,18 @@ export async function adminForgotPassword(req, res) {
     };
 
     if (!user || !user.isActive) {
-      await redis.set(k.resetCooldown, '1', 'EX', OTP_RESEND_COOLDOWN_SEC);
+      await redisSet(k.resetCooldown, '1', OTP_RESEND_COOLDOWN_SEC);
       return res.status(200).json(generic);
     }
 
     const otp = generateOtp();
-    await redis.set(k.resetOtp, otp, 'EX', OTP_TTL_SEC);
-    await redis.set(k.resetCooldown, '1', 'EX', OTP_RESEND_COOLDOWN_SEC);
+    await redisSet(k.resetOtp, otp, OTP_TTL_SEC);
+    await redisSet(k.resetCooldown, '1', OTP_RESEND_COOLDOWN_SEC);
 
     try {
       await sendAdminPasswordResetOtpEmail(user.email, otp);
     } catch (mailErr) {
-      await redis.del(k.resetOtp);
+      await redisDel(k.resetOtp);
       console.error('adminForgotPassword email', mailErr);
       return res.status(502).json({
         success: false,
@@ -356,16 +358,15 @@ export async function adminVerifyResetOtp(req, res) {
       return res.status(400).json({ success: false, message: 'Email and code are required.' });
     }
 
-    const redis = getRedis();
     const k = keys(emailKey);
-    const stored = await redis.get(k.resetOtp);
+    const stored = await redisGet(k.resetOtp);
 
     if (!stored || stored !== code) {
       return res.status(401).json({ success: false, message: 'Invalid or expired code.' });
     }
 
-    await redis.del(k.resetOtp);
-    await redis.set(k.resetVerified, '1', 'EX', RESET_VERIFIED_TTL_SEC);
+    await redisDel(k.resetOtp);
+    await redisSet(k.resetVerified, '1', RESET_VERIFIED_TTL_SEC);
 
     return res.status(200).json({ success: true, verified: true });
   } catch (e) {
@@ -389,9 +390,8 @@ export async function adminResetPassword(req, res) {
       });
     }
 
-    const redis = getRedis();
     const k = keys(emailKey);
-    const verified = await redis.get(k.resetVerified);
+    const verified = await redisGet(k.resetVerified);
     if (!verified) {
       return res.status(401).json({
         success: false,
@@ -401,11 +401,11 @@ export async function adminResetPassword(req, res) {
 
     const user = await AdminUser.findOne({ email: emailKey });
     if (!user || !user.isActive) {
-      await redis.del(k.resetVerified);
+      await redisDel(k.resetVerified);
       return res.status(404).json({ success: false, message: 'Account not found.' });
     }
 
-    await redis.del(k.resetVerified);
+    await redisDel(k.resetVerified);
     user.passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
     await user.save();
 
