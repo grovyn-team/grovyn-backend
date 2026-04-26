@@ -10,6 +10,11 @@ import {
   redisTtl,
 } from '../config/redisStore.js';
 import { sendAdminLoginOtpEmail, sendAdminPasswordResetOtpEmail } from '../services/adminEmail.js';
+import {
+  setAdminSessionCookie,
+  clearAdminSessionCookie,
+  getAdminTokenFromRequest,
+} from '../config/adminSessionCookie.js';
 
 const NS = 'grovyn:admin';
 const OTP_TTL_SEC = 300;
@@ -194,9 +199,10 @@ export async function adminVerifyLoginOtp(req, res) {
       });
     }
 
-    const { email, otp } = req.body || {};
+    const { email, otp, keepSession } = req.body || {};
     const emailKey = normalizeEmail(email);
     const code = typeof otp === 'string' ? otp.trim() : '';
+    const persistSession = keepSession === true;
 
     if (!emailKey || !code) {
       return res.status(400).json({ success: false, message: 'Email and code are required.' });
@@ -225,11 +231,15 @@ export async function adminVerifyLoginOtp(req, res) {
 
     await redisDel(k.loginChallenge, k.loginOtp, k.loginOtpCooldown);
 
-    const token = jwt.sign({ role: 'admin', sub: user.email }, secret, { expiresIn: '7d' });
+    const expiresIn = persistSession ? '7d' : '2d';
+    const maxAgeMs = (persistSession ? 7 : 2) * 24 * 60 * 60 * 1000;
+    const token = jwt.sign({ role: 'admin', sub: user.email }, secret, { expiresIn });
+
+    setAdminSessionCookie(res, token, maxAgeMs);
 
     return res.status(200).json({
       success: true,
-      data: { token },
+      data: { session: 'cookie' },
     });
   } catch (e) {
     console.error('adminVerifyLoginOtp', e);
@@ -424,12 +434,12 @@ export async function adminResetPassword(req, res) {
 
 export async function adminMe(req, res) {
   const secret = jwtSecret();
-  const header = req.headers.authorization;
-  if (!secret || !header?.startsWith('Bearer ')) {
+  const token = getAdminTokenFromRequest(req);
+  if (!secret || !token) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
   try {
-    const payload = jwt.verify(header.slice(7), secret);
+    const payload = jwt.verify(token, secret);
     const email = typeof payload.sub === 'string' ? payload.sub : undefined;
     return res.status(200).json({ success: true, data: { role: 'admin', email } });
   } catch {
@@ -438,5 +448,6 @@ export async function adminMe(req, res) {
 }
 
 export async function adminLogout(_req, res) {
+  clearAdminSessionCookie(res);
   return res.status(200).json({ success: true });
 }

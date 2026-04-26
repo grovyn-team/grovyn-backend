@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import connectDB from './config/database.js';
 import careersRoutes from './routes/careers.routes.js';
 import contactRoutes from './routes/contact.routes.js';
@@ -16,6 +17,7 @@ const port = process.env.PORT || 3000;
 connectDB();
 
 app.use(express.json());
+app.use(cookieParser());
 app.use(cors({
     origin: process.env.FRONTEND_URL,
     credentials: true,
