@@ -463,7 +463,7 @@ const submitContact = async (req, res) => {
       budget: budget ? budget.trim() : null,
       timeline: timeline ? timeline.trim() : null,
       message: message.trim(),
-      status: 'new',
+      status: 'prospect',
       submittedAt: new Date(),
     };
 

@@ -45,7 +45,6 @@ const careerApplicationSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['pending', 'reviewed', 'shortlisted', 'rejected', 'accepted'],
       default: 'pending',
     },
     submittedAt: {

@@ -6,6 +6,8 @@ import connectDB from './config/database.js';
 import careersRoutes from './routes/careers.routes.js';
 import contactRoutes from './routes/contact.routes.js';
 import newsletterRoutes from './routes/newsletter.routes.js';
+import cmsPublicRoutes from './routes/cms.public.routes.js';
+import adminRoutes from './routes/admin.routes.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -21,6 +23,8 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 app.use(express.urlencoded({ extended: true }));
+app.use(cmsPublicRoutes);
+app.use(adminRoutes);
 app.use(careersRoutes);
 app.use(contactRoutes);
 app.use(newsletterRoutes);

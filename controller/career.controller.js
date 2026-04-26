@@ -32,12 +32,12 @@ const uploadPDFToCloudinary = async (fileBuffer, fileName, folder = 'careers/res
     // Convert buffer to stream
     const uploadStream = cloudinary.uploader.upload_stream(
       {
-        resource_type: 'auto', // Auto-detect resource type (works for PDF, DOC, DOCX, etc.)
+        /** Raw delivery avoids broken PDF handling under image/upload (browser + server fetch). */
+        resource_type: 'raw',
         folder: folder,
         public_id: publicId,
-        allowed_formats: ['pdf', 'doc', 'docx', 'txt'],
-        use_filename: false, // Don't use original filename
-        unique_filename: true, // Ensure unique filenames
+        use_filename: false,
+        unique_filename: true,
       },
       (error, result) => {
         if (error) {
@@ -210,7 +210,10 @@ const getOpenings = async (req, res) => {
       .sort({ order: 1, createdAt: -1 })
       .select(FIELDS)
       .lean();
-    const resolved = openings.map((o) => resolveLocaleFields(o, locale));
+    const resolved = openings.map((o) => ({
+      _id: o._id,
+      ...resolveLocaleFields(o, locale),
+    }));
     res.status(200).json(resolved);
   } catch (error) {
     console.error('Error fetching job openings:', error);
@@ -344,6 +347,130 @@ const deleteOpening = async (req, res) => {
   }
 };
 
+const FETCH_HEADERS = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  Accept: 'application/pdf,application/octet-stream,application/msword,*/*;q=0.8',
+};
+
+async function fetchCloudinaryBinary(url) {
+  return fetch(url, { redirect: 'follow', headers: FETCH_HEADERS });
+}
+
+/**
+ * Try every reasonable way to GET bytes from Cloudinary (signed URLs help server-side fetch).
+ */
+async function fetchResumeFromCloudinary(storedUrl, publicId) {
+  const attempts = [];
+  const add = (u) => {
+    if (u && typeof u === 'string' && !attempts.includes(u)) attempts.push(u);
+  };
+
+  if (publicId && process.env.CLOUDINARY_CLOUD_NAME) {
+    for (const resourceType of ['image', 'raw']) {
+      try {
+        add(
+          cloudinary.url(publicId, {
+            secure: true,
+            sign_url: true,
+            resource_type: resourceType,
+            type: 'upload',
+          })
+        );
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  add(storedUrl);
+
+  if (publicId && process.env.CLOUDINARY_CLOUD_NAME) {
+    for (const resourceType of ['image', 'raw']) {
+      try {
+        const meta = await cloudinary.api.resource(publicId, { resource_type: resourceType });
+        if (meta?.secure_url) add(meta.secure_url);
+      } catch {
+        /* wrong resource_type */
+      }
+    }
+    for (const resourceType of ['image', 'raw']) {
+      try {
+        add(cloudinary.url(publicId, { secure: true, resource_type: resourceType, type: 'upload' }));
+      } catch {
+        /* ignore */
+      }
+      try {
+        add(
+          cloudinary.url(publicId, {
+            secure: true,
+            resource_type: resourceType,
+            type: 'upload',
+            sign_url: true,
+          })
+        );
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  let lastStatus = 0;
+  for (const url of attempts) {
+    const r = await fetchCloudinaryBinary(url);
+    lastStatus = r.status;
+    if (r.ok) return r;
+  }
+  return { ok: false, status: lastStatus };
+}
+
+/**
+ * GET /admin/career-applications/:id/resume — stream file for admin preview (inline PDF / viewer).
+ */
+const streamApplicationResume = async (req, res) => {
+  try {
+    const doc = await CareerApplication.findById(req.params.id).lean();
+    if (!doc?.resume?.url) {
+      return res.status(404).json({ success: false, message: 'Application or resume not found' });
+    }
+    const sourceUrl = doc.resume.url;
+    const publicId = doc.resume.public_id;
+
+    const upstream = await fetchResumeFromCloudinary(sourceUrl, publicId);
+    if (!upstream.ok) {
+      console.error('streamApplicationResume failed', {
+        status: upstream.status,
+        url: sourceUrl,
+        publicId: publicId || null,
+      });
+      return res.status(502).json({ success: false, message: 'Could not fetch file from storage' });
+    }
+
+    let contentType = upstream.headers.get('content-type') || 'application/octet-stream';
+    const lower = sourceUrl.toLowerCase();
+    if (lower.endsWith('.pdf') || lower.includes('.pdf') || lower.includes('.pdf?')) {
+      if (!contentType.includes('pdf')) contentType = 'application/pdf';
+    } else if (lower.endsWith('.docx') || lower.includes('.docx')) {
+      if (!contentType.includes('wordprocessingml')) {
+        contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      }
+    } else if (lower.endsWith('.doc') || (lower.includes('.doc') && !lower.includes('.docx'))) {
+      if (!contentType.includes('msword')) contentType = 'application/msword';
+    }
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', 'inline; filename="resume"');
+    const len = upstream.headers.get('content-length');
+    if (len) res.setHeader('Content-Length', len);
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    return res.send(buffer);
+  } catch (error) {
+    console.error('streamApplicationResume', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to stream resume',
+    });
+  }
+};
+
 export {
   applyForJob,
   processAndUploadResume,
@@ -353,4 +480,5 @@ export {
   createOpening,
   updateOpening,
   deleteOpening,
+  streamApplicationResume,
 };

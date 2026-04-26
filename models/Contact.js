@@ -39,10 +39,10 @@ const contactSchema = new mongoose.Schema(
       required: [true, 'Message is required'],
       trim: true,
     },
+    /** Pipeline: prospect, viewed, replied, no_response, deal */
     status: {
       type: String,
-      enum: ['new', 'read', 'replied', 'archived'],
-      default: 'new',
+      default: 'prospect',
     },
     submittedAt: {
       type: Date,
